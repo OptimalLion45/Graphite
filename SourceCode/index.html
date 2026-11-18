@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#d9dee4">
+<title>Graphite</title>
+<link rel="icon" href="https://i.ibb.co/jZq06LBd/Graphite-Logo-Background.png?v=3" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&display=swap" rel="stylesheet">
+<link rel="prefetch" href="builder.html">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="ambient" aria-hidden="true">
+<div class="ambient-light is-white"></div>
+<div class="ambient-light is-blue"></div>
+</div>
+
+
+<header class="site-header">
+<button class="logo-btn" type="button" aria-label="Refresh Graphite workspace" data-tooltip="Refresh">
+<img class="logo-btn__img" src="https://i.ibb.co/YFm3Y09Q/Graphite-Logo-Transparent.png" alt="" width="60" height="60" draggable="false">
+</button>
+</header>
+
+
+<main class="builder-entry">
+<div class="tagline-wrap">
+<h1 class="tagline"><span class="tagline__word">Describe</span> <span class="tagline__word">it.</span> <span class="tagline__word">Graphite</span> <span class="tagline__word">builds</span> <span class="tagline__word">it.</span></h1>
+<div class="tagline-lens" aria-hidden="true">
+<div class="tagline-lens__view">
+<span class="tagline"><span class="tagline__word">Describe</span> <span class="tagline__word">it.</span> <span class="tagline__word">Graphite</span> <span class="tagline__word">builds</span> <span class="tagline__word">it.</span></span>
+</div>
+<div class="tagline-lens__glass"></div>
+<div class="tagline-lens__ring"></div>
+</div>
+</div>
+<div class="prompt-box">
+<div class="prompt-box__field">
+<input
+class="prompt-box__input"
+type="text"
+autocomplete="off"
+spellcheck="false"
+aria-label="Describe the website you want Graphite to build"
+>
+<span class="prompt-box__placeholder" aria-hidden="true"></span>
+<span class="prompt-box__status" role="status" aria-live="polite">
+<span class="prompt-box__status-text"></span>
+</span>
+</div>
+<button class="model-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="model-menu" aria-label="Model: Gemini 4 Hydrogen, thinking Medium" data-tooltip="Model and thinking level">
+<img class="model-trigger__icon" src="https://img.icons8.com/color/48/gemini-ai.png" alt="" width="18" height="18" draggable="false">
+<span class="model-trigger__name">Gemini 4 Hydrogen</span>
+<span class="model-trigger__level" data-level="med">
+<svg class="model-trigger__level-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="M12 3a6 6 0 0 0-4 10.5c.7.6 1 1.4 1 2.3V16h6v-.2c0-.9.3-1.7 1-2.3A6 6 0 0 0 12 3z"/>
+<path d="M9.5 19.5h5"/>
+</svg>
+<span class="model-trigger__level-text">Med</span>
+</span>
+<svg class="model-trigger__chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="M6 9l6 6 6-6"/>
+</svg>
+</button>
+<button class="prompt-box__action" type="button" aria-label="Build" data-tooltip="Build">
+<span class="prompt-box__icon prompt-box__icon--play" aria-hidden="true">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+<path d="M6 5.912c0-.155.037-.307.107-.443c.23-.44.75-.599 1.163-.354l10.29 6.088c.14.083.255.206.332.355c.23.44.08.995-.332 1.239L7.27 18.885a.8.8 0 0 1-.415.115C6.383 19 6 18.592 6 18.089z"/>
+</svg>
+</span>
+<span class="prompt-box__icon prompt-box__icon--stop" aria-hidden="true">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+<path d="M7 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2"/>
+</svg>
+</span>
+</button>
+</div>
+</main>
+
+
+<footer class="site-footer">
+<span class="version">Pre-Alpha 0.0.1 | Build 0.4.1</span>
+</footer>
+
+
+<div class="model-menu" id="model-menu" role="dialog" aria-label="Model settings">
+<p class="model-menu__label" id="model-list-label">Model</p>
+<div class="model-list" role="listbox" aria-labelledby="model-list-label">
+<div class="model-option is-selected" role="option" aria-selected="true" tabindex="0" data-model="gemini-4-hydrogen">
+<img class="model-option__icon" src="https://img.icons8.com/color/48/gemini-ai.png" alt="" width="32" height="32" draggable="false">
+<span class="model-option__text">
+<span class="model-option__name">Gemini 4 Hydrogen</span>
+<span class="model-option__meta">Fast, everyday coding</span>
+</span>
+<svg class="model-option__check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<path d="M5 12.5l4.5 4.5L19 7.5"/>
+</svg>
+</div>
+</div>
+<div class="model-menu__divider" aria-hidden="true"></div>
+<div class="model-menu__head">
+<p class="model-menu__label" id="thinking-label">Thinking</p>
+<span class="model-menu__value model-menu__thinking">Medium</span>
+</div>
+<div class="thinking-switch" role="radiogroup" aria-labelledby="thinking-label">
+<span class="thinking-switch__glass" aria-hidden="true"></span>
+<button class="thinking-switch__option" type="button" role="radio" aria-checked="false" tabindex="-1" data-level="low" data-tooltip="Quickest replies">Low</button>
+<button class="thinking-switch__option is-active" type="button" role="radio" aria-checked="true" tabindex="0" data-level="med" data-tooltip="Balanced speed and depth">Med</button>
+<button class="thinking-switch__option" type="button" role="radio" aria-checked="false" tabindex="-1" data-level="high" data-tooltip="Deeper reasoning">High</button>
+<button class="thinking-switch__option" type="button" role="radio" aria-checked="false" tabindex="-1" data-level="xhigh" data-tooltip="Most thorough, slowest">XHigh</button>
+</div>
+<div class="model-menu__divider" aria-hidden="true"></div>
+<div class="model-menu__head">
+<p class="model-menu__label" id="key-label">API key</p>
+<span class="model-menu__value model-menu__key-state">Not set</span>
+</div>
+<label class="key-field">
+<span class="key-field__badge" aria-hidden="true">
+<img class="key-field__icon" src="https://kie.ai/logo-icon.webp" alt="kie.ai" width="50" height="50" loading="lazy" decoding="async" draggable="false">
+</span>
+<input class="key-field__input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your kie.ai key" aria-labelledby="key-label">
+</label>
+<p class="model-menu__hint">Stored only in this browser.</p>
+</div>
+
+
+<div class="tooltip" role="tooltip" aria-hidden="true"></div>
+<div class="soften" aria-hidden="true"></div>
+<script src="script.js" defer></script>
+</body>
+</html>
