@@ -1,4 +1,5 @@
 (() => {
+const root = document.documentElement;
 const input = document.querySelector(".prompt-box__input");
 const placeholder = document.querySelector(".prompt-box__placeholder");
 const box = document.querySelector(".prompt-box");
@@ -17,8 +18,10 @@ const thinkingButtons = Array.from(modelMenu?.querySelectorAll(".thinking-switch
 const keyInput = modelMenu?.querySelector(".key-field__input");
 const keyState = modelMenu?.querySelector(".model-menu__key-state");
 const tooltip = document.querySelector(".tooltip");
+const tooltipText = tooltip?.querySelector(".tooltip__text") || tooltip;
 const logoBtn = document.querySelector(".logo-btn");
 const stage = document.querySelector(".builder-entry");
+const footer = document.querySelector(".site-footer");
 const lensWrap = document.querySelector(".tagline-wrap");
 const lensText = lensWrap?.querySelector(":scope > .tagline");
 const taglineWordElements = Array.from(lensText?.querySelectorAll(".tagline__word") ?? []);
@@ -41,7 +44,10 @@ const supportsLensPath = CSS.supports("clip-path", 'path(evenodd, "M0 0H10V10H0Z
 const isChromeDesktop = isChrome && isDesktop && supportsLensPath;
 
 
-if (!input || !placeholder || !box || !action) return;
+if (!input || !placeholder || !box || !action) {
+root.classList.remove("is-preload");
+return;
+}
 
 
 const phrases = [
@@ -95,9 +101,14 @@ const API_KEY_KEY = "graphite:api-key";
 const HANDOFF_DELAY = 2400;
 const LEAVE_DURATION = 460;
 const RELEASE_DURATION = 650;
+const INTRO_FONT_WAIT = 700;
+const INTRO_TOTAL = 3000;
 const MENU_GAP = 10;
-const TIP_DELAY = 500;
-const TIP_WARM = 600;
+const MENU_EDGE = 16;
+const MENU_MIN = 240;
+const TIP_DELAY = 300;
+const TIP_WARM = 700;
+const TIP_GRACE = 60;
 const TIP_GAP = 8;
 const LENS_ZOOM = 0.14;
 const LENS_PAD = 0.2;
@@ -111,7 +122,7 @@ const POP_REST_SCALE = 0.94;
 const REFRESH_OUT = 420;
 const REFRESH_IN = 680;
 const STATUS_STEP = 2800;
-const STATUS_SWAP = 420;
+const STATUS_SWAP = 380;
 const SOFTEN_CLEAR = "blur(0px) saturate(100%)";
 const SOFTEN_FROSTED = "blur(14px) saturate(115%)";
 const GLASS_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
@@ -136,7 +147,10 @@ let building = false;
 let refreshing = false;
 let leaving = false;
 let fontsReady = false;
-let loadFinished = !soften || motionPreference.matches;
+let loadFinished = false;
+let introRunning = true;
+let introTimer = 0;
+let resizeFrame = 0;
 let statusIndex = 0;
 let statusTimer = 0;
 let statusSwapTimer = 0;
@@ -151,6 +165,7 @@ let tipTarget = null;
 let tipPending = null;
 let tipBlocked = null;
 let tipTimer = 0;
+let tipHideTimer = 0;
 let tipHiddenAt = 0;
 
 
@@ -215,6 +230,30 @@ return;
 }
 
 
+function startIntro() {
+if (!root.classList.contains("is-preload") || motionPreference.matches) {
+finishIntro();
+return;
+}
+root.classList.remove("is-preload");
+root.classList.add("is-intro");
+window.clearTimeout(introTimer);
+introTimer = window.setTimeout(finishIntro, INTRO_TOTAL);
+}
+
+
+function finishIntro() {
+window.clearTimeout(introTimer);
+introTimer = 0;
+root.classList.remove("is-intro", "is-preload");
+if (!introRunning) return;
+introRunning = false;
+loadFinished = true;
+measureLens();
+maybeEnableLens();
+}
+
+
 function applyKey() {
 if (keyInput && document.activeElement !== keyInput) keyInput.value = apiKey;
 if (!keyState) return;
@@ -243,7 +282,7 @@ glass.animate([
 { transform: `translateX(${from}px) scaleX(1)`, easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
 { transform: `translateX(${middle}px) scaleX(1.16)`, offset: 0.42, easing: GLASS_EASE },
 { transform: `translateX(${to}px) scaleX(1)` }
-], { duration: 460 });
+], { duration: 400 });
 }
 
 
@@ -251,13 +290,13 @@ function applyModel(animate = false) {
 const model = currentModel();
 const level = levelFor(thinkingId);
 const prevLevel = modelLevel?.dataset.level;
-if (modelName) modelName.textContent = model.name;
+if (modelName && modelName.textContent !== model.name) modelName.textContent = model.name;
 if (modelLevel) modelLevel.dataset.level = level.id;
-if (modelLevelText) modelLevelText.textContent = level.short;
+if (modelLevelText && modelLevelText.textContent !== level.short) modelLevelText.textContent = level.short;
 if (animate && !motionPreference.matches && modelLevel && prevLevel && prevLevel !== level.id) {
 modelLevel.animate(
 [{ opacity: 0.65, transform: "scale(0.94)" }, { opacity: 1, transform: "scale(1)" }],
-{ duration: 240, easing: GLASS_EASE }
+{ duration: 220, easing: GLASS_EASE }
 );
 }
 if (modelIcon && modelIcon.getAttribute("src") !== model.icon) modelIcon.src = model.icon;
@@ -306,16 +345,21 @@ applyModel(true);
 
 function positionMenu() {
 if (!modelTrigger || !modelMenu) return;
+modelMenu.style.maxHeight = "";
 const anchor = box.getBoundingClientRect();
 const trigger = modelTrigger.getBoundingClientRect();
 const width = modelMenu.offsetWidth;
-const height = modelMenu.offsetHeight;
-const spaceBelow = window.innerHeight - anchor.bottom;
-const below = spaceBelow >= height + MENU_GAP + 12 || spaceBelow >= anchor.top;
+const natural = modelMenu.offsetHeight;
+const spaceBelow = window.innerHeight - anchor.bottom - MENU_GAP - MENU_EDGE;
+const spaceAbove = anchor.top - MENU_GAP - MENU_EDGE;
+const above = spaceAbove >= Math.min(natural, MENU_MIN) || spaceAbove >= spaceBelow;
+const room = Math.max(above ? spaceAbove : spaceBelow, 0);
+const height = Math.min(natural, room);
+if (natural > room) modelMenu.style.maxHeight = `${room.toFixed(1)}px`;
 const left = clamp(anchor.right - width, 12, window.innerWidth - width - 12);
-const top = below ? anchor.bottom + MENU_GAP : anchor.top - height - MENU_GAP;
-modelMenu.dataset.side = below ? "below" : "above";
-modelMenu.style.transformOrigin = `${(trigger.left + trigger.width / 2 - left).toFixed(1)}px ${below ? 0 : height}px`;
+const top = above ? anchor.top - height - MENU_GAP : anchor.bottom + MENU_GAP;
+modelMenu.dataset.side = above ? "above" : "below";
+modelMenu.style.transformOrigin = `${(trigger.left + trigger.width / 2 - left).toFixed(1)}px ${above ? height.toFixed(1) : 0}px`;
 modelMenu.style.transform = `translate3d(${left.toFixed(1)}px, ${top.toFixed(1)}px, 0)`;
 }
 
@@ -328,6 +372,7 @@ apiKey = normalizeKey(loadText(API_KEY_KEY));
 applyModel(false);
 applyKey();
 positionMenu();
+modelMenu.scrollTop = 0;
 modelMenu.classList.add("is-open");
 modelTrigger.setAttribute("aria-expanded", "true");
 if (focusFirst) {
@@ -397,49 +442,87 @@ next.focus({ preventScroll: true });
 
 function canTip(target) {
 if (!tooltip || !target || !target.dataset.tooltip) return false;
-if (target.disabled) return false;
+if (target.disabled || introRunning || leaving || refreshing) return false;
 if (menuOpen && target === modelTrigger) return false;
-return !leaving && !refreshing;
+return target.isConnected;
 }
 
 
-function placeTip(target) {
+function placeTip(target, glide) {
 const rect = target.getBoundingClientRect();
+if (!rect.width && !rect.height) return false;
 const width = tooltip.offsetWidth;
 const height = tooltip.offsetHeight;
 const above = rect.top - height - TIP_GAP >= 8;
 const left = clamp(rect.left + rect.width / 2 - width / 2, 8, window.innerWidth - width - 8);
 const top = above ? rect.top - height - TIP_GAP : rect.bottom + TIP_GAP;
+tooltip.classList.toggle("is-gliding", Boolean(glide) && !motionPreference.matches);
 tooltip.dataset.side = above ? "above" : "below";
-tooltip.style.transform = `translate3d(${left.toFixed(1)}px, ${top.toFixed(1)}px, 0)`;
+tooltip.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
+return true;
+}
+
+
+function setTipText(text) {
+if (tooltipText.textContent !== text) tooltipText.textContent = text;
 }
 
 
 function showTip(target) {
+window.clearTimeout(tipTimer);
+window.clearTimeout(tipHideTimer);
 tipTimer = 0;
+tipHideTimer = 0;
 tipPending = null;
-if (!canTip(target)) return;
+if (!canTip(target)) {
+concealTip();
+return;
+}
+const swapping = Boolean(tipTarget) && tooltip.classList.contains("is-visible");
+setTipText(target.dataset.tooltip);
+if (!placeTip(target, swapping)) {
+concealTip();
+return;
+}
 tipTarget = target;
-tooltip.textContent = target.dataset.tooltip;
-placeTip(target);
 tooltip.classList.add("is-visible");
 }
 
 
-function hideTip() {
+function concealTip() {
+window.clearTimeout(tipHideTimer);
+tipHideTimer = 0;
+if (tipTarget) tipHiddenAt = performance.now();
+tipTarget = null;
+tooltip?.classList.remove("is-visible", "is-gliding");
+}
+
+
+function hideTip(immediate = true) {
 window.clearTimeout(tipTimer);
 tipTimer = 0;
 tipPending = null;
-if (tipTarget) tipHiddenAt = performance.now();
-tipTarget = null;
-tooltip?.classList.remove("is-visible");
+if (!tipTarget) return;
+if (immediate) {
+concealTip();
+return;
+}
+if (tipHideTimer) return;
+tipHideTimer = window.setTimeout(concealTip, TIP_GRACE);
 }
 
 
 function queueTip(target, immediate) {
-if (target === tipTarget || target === tipPending) return;
+if (target === tipTarget) {
+window.clearTimeout(tipHideTimer);
+tipHideTimer = 0;
+return;
+}
+if (target === tipPending) return;
+window.clearTimeout(tipTimer);
+tipTimer = 0;
+tipPending = null;
 const warm = Boolean(tipTarget) || performance.now() - tipHiddenAt < TIP_WARM;
-hideTip();
 if (immediate || warm) {
 showTip(target);
 return;
@@ -451,8 +534,8 @@ tipTimer = window.setTimeout(() => showTip(target), TIP_DELAY);
 
 function refreshTip(target) {
 if (tipTarget !== target) return;
-tooltip.textContent = target.dataset.tooltip;
-placeTip(target);
+setTipText(target.dataset.tooltip);
+placeTip(target, true);
 }
 
 
@@ -497,12 +580,12 @@ locked = false;
 swapTimer = 0;
 });
 });
-}, 700);
+}, 600);
 }
 
 
 function cycle() {
-if (box.classList.contains("has-value") || document.activeElement === input || building || refreshing) return;
+if (document.hidden || box.classList.contains("has-value") || document.activeElement === input || building || refreshing) return;
 setPhrase(pickNext());
 }
 
@@ -607,11 +690,14 @@ const label = building ? "Stop" : "Build";
 box.classList.toggle("has-value", hasValue);
 box.classList.toggle("is-building", building);
 input.readOnly = building;
+if (action.dataset.tooltip !== label) {
 action.setAttribute("aria-label", label);
 action.dataset.tooltip = label;
 refreshTip(action);
-if (modelTrigger) modelTrigger.disabled = building || leaving;
-if (modelTrigger?.disabled && tipTarget === modelTrigger) hideTip();
+}
+const locked = building || leaving;
+if (modelTrigger && modelTrigger.disabled !== locked) modelTrigger.disabled = locked;
+if (locked && tipTarget === modelTrigger) hideTip();
 }
 
 
@@ -831,7 +917,7 @@ return { mag: form, glass: POP_REST_SCALE + (1 - POP_REST_SCALE) * form, opacity
 
 
 function popVisual(t) {
-const from = lens.popFrom;
+const from = lens.popFrom || formVisual(1);
 const relax = easeOutCubic(t);
 const fade = easeInOutSine(t);
 return {
@@ -843,6 +929,7 @@ opacity: from.opacity * (1 - fade)
 
 
 function paintLens(visual = formVisual(clamp(lens.form.value, 0, 1))) {
+if (!lens.rect || !lensWrap || !lensText) return;
 const minWidth = lens.baseH * LENS_MIN_RATIO;
 const left = lens.left.value;
 const width = Math.max(lens.right.value - left, minWidth);
@@ -911,12 +998,12 @@ lens.last = 0;
 
 
 function canLens() {
-return lens.ready && !refreshing && !leaving && lensQuery.matches && !motionPreference.matches;
+return lens.ready && !introRunning && !refreshing && !leaving && lensQuery.matches && !motionPreference.matches;
 }
 
 
 function formLens() {
-if (lens.state !== "idle" || !lens.words.length) return;
+if (lens.state !== "idle" || !lens.words.length || !lens.rect) return;
 lens.state = "active";
 lens.word = -1;
 targetWord(pickWord(lens.px - lens.rect.left));
@@ -1065,7 +1152,7 @@ if (lens.pointerSeen) onLensPointer(lens.px, lens.py);
 
 
 function resetPage() {
-if (refreshing || leaving) return;
+if (refreshing || leaving || introRunning) return;
 closeMenu();
 hideTip();
 if (lens.state === "active") popLens();
@@ -1117,10 +1204,9 @@ function restoreFromHistory(event) {
 if (!event.persisted) return;
 leaving = false;
 refreshing = false;
-soften?.getAnimations().forEach(animation => {
-if (!(animation instanceof CSSAnimation)) animation.cancel();
-});
+soften?.getAnimations().forEach(animation => animation.cancel());
 stage?.getAnimations().forEach(animation => animation.cancel());
+finishIntro();
 apiKey = normalizeKey(loadText(API_KEY_KEY));
 applyKey();
 resetState();
@@ -1129,7 +1215,7 @@ finishRefresh();
 
 
 function onResize() {
-hideTip();
+resizeFrame = 0;
 if (menuOpen) positionMenu();
 if (refreshing) return;
 measureLens();
@@ -1141,6 +1227,12 @@ return;
 lens.word = -1;
 targetWord(pickWord(lens.px - lens.rect.left));
 requestLens();
+}
+
+
+function scheduleResize() {
+hideTip();
+if (!resizeFrame) resizeFrame = window.requestAnimationFrame(onResize);
 }
 
 
@@ -1234,27 +1326,27 @@ hideTip();
 if (!menuOpen) return;
 if (modelMenu.contains(event.target) || modelTrigger.contains(event.target)) return;
 closeMenu();
-}, true);
+}, { capture: true, passive: true });
 
 
 document.addEventListener("pointerover", event => {
 if (event.pointerType === "touch") return;
 const target = event.target.closest?.("[data-tooltip]");
 if (!target) {
-if (tipTarget || tipPending) hideTip();
+if (tipTarget || tipPending) hideTip(false);
 return;
 }
 if (target === tipBlocked) return;
 queueTip(target, false);
-});
+}, { passive: true });
 
 
 document.addEventListener("pointerout", event => {
 const target = event.target.closest?.("[data-tooltip]");
 if (!target || target.contains(event.relatedTarget)) return;
 if (target === tipBlocked) tipBlocked = null;
-if (target === tipTarget || target === tipPending) hideTip();
-});
+if (target === tipTarget || target === tipPending) hideTip(false);
+}, { passive: true });
 
 
 document.addEventListener("focusin", event => {
@@ -1264,7 +1356,7 @@ if (target && target.matches(":focus-visible")) queueTip(target, true);
 
 
 document.addEventListener("focusout", event => {
-if (event.target === tipTarget || event.target === tipPending) hideTip();
+if (event.target === tipTarget || event.target === tipPending) hideTip(false);
 });
 
 
@@ -1274,6 +1366,11 @@ if (event.key === "Escape") hideTip();
 
 
 logoBtn?.addEventListener("click", resetPage);
+
+
+footer?.addEventListener("animationend", event => {
+if (event.target === footer && event.animationName === "intro-in") finishIntro();
+});
 
 
 window.addEventListener("storage", event => {
@@ -1300,12 +1397,15 @@ if (!event.relatedTarget && lens.state === "active") popLens();
 }, { passive: true });
 
 
-window.addEventListener("resize", onResize, { passive: true });
-window.addEventListener("scroll", onResize, { passive: true });
+window.addEventListener("resize", scheduleResize, { passive: true });
+window.addEventListener("scroll", scheduleResize, { passive: true });
 window.addEventListener("pageshow", restoreFromHistory);
 
 
-document.fonts.ready.then(() => {
+const fontsLoaded = document.fonts?.ready ?? Promise.resolve();
+
+
+fontsLoaded.then(() => {
 fontsReady = true;
 measureLens();
 maybeEnableLens();
@@ -1313,13 +1413,10 @@ applyModel(false);
 });
 
 
-if (soften && !motionPreference.matches) {
-soften.addEventListener("animationend", event => {
-if (event.target !== soften || event.animationName !== "soften-reveal") return;
-loadFinished = true;
-maybeEnableLens();
-}, { once: true });
-}
+Promise.race([
+fontsLoaded,
+new Promise(resolve => window.setTimeout(resolve, INTRO_FONT_WAIT))
+]).then(() => requestAnimationFrame(startIntro));
 
 
 document.addEventListener("visibilitychange", () => {
@@ -1344,8 +1441,8 @@ motionPreference.addEventListener?.("change", () => {
 if (motionPreference.matches) {
 lens.ready = false;
 haltLens();
+finishIntro();
 } else {
-loadFinished = true;
 measureLens();
 maybeEnableLens();
 }
