@@ -34,6 +34,7 @@ const thinkingButtons = Array.from(modelMenu?.querySelectorAll(".thinking-switch
 const keyInput = modelMenu?.querySelector(".key-field__input");
 const keyState = modelMenu?.querySelector(".model-menu__key-state");
 const tooltip = document.querySelector(".tooltip");
+const tooltipText = tooltip?.querySelector(".tooltip__text") || tooltip;
 const homeLink = document.querySelector(".project__home");
 const deviceSwitch = document.querySelector(".device-switch");
 const switchGlass = deviceSwitch?.querySelector(".device-switch__glass");
@@ -308,10 +309,14 @@ const DRAG_THRESHOLD = 4;
 const DOCK_MAX = 680;
 const DOCK_MIN = 480;
 const MENU_GAP = 10;
+const MENU_EDGE = 16;
+const MENU_MIN = 240;
 const TIP_DELAY = 500;
 const TIP_WARM = 600;
+const TIP_GRACE = 90;
 const TIP_GAP = 8;
 const NOTICE_DURATION = 6500;
+const NOTICE_INSET = 16;
 const LIVE_MIN = 1400;
 const REVEAL_FALLBACK = 900;
 const CHUNK_TIMEOUT = 60000;
@@ -381,8 +386,10 @@ let tipTarget = null;
 let tipPending = null;
 let tipBlocked = null;
 let tipTimer = 0;
+let tipHideTimer = 0;
 let tipHiddenAt = 0;
 let noticeTimer = 0;
+let chipAnimation = null;
 let areaTop = 0;
 let areaBottom = 0;
 let areaCy = window.innerHeight / 2;
@@ -510,7 +517,7 @@ if (modelLevelText) modelLevelText.textContent = level.short;
 if (animate && !motionPreference.matches && modelLevel && prevLevel && prevLevel !== level.id) {
 modelLevel.animate(
 [{ opacity: 0.65, transform: "scale(0.94)" }, { opacity: 1, transform: "scale(1)" }],
-{ duration: 240, easing: GLASS_EASE }
+{ duration: 260, easing: GLASS_EASE }
 );
 }
 if (modelIcon && modelIcon.getAttribute("src") !== model.icon) modelIcon.src = model.icon;
@@ -576,16 +583,25 @@ layoutFloats(true);
 
 function positionMenu() {
 if (!modelTrigger || !modelMenu) return;
+modelMenu.style.maxHeight = "";
 const anchor = box.getBoundingClientRect();
 const trigger = modelTrigger.getBoundingClientRect();
 const width = modelMenu.offsetWidth;
-const height = modelMenu.offsetHeight;
-const spaceBelow = window.innerHeight - anchor.bottom;
-const below = spaceBelow >= height + MENU_GAP + 12 || spaceBelow >= anchor.top;
+const natural = modelMenu.offsetHeight;
+const spaceBelow = window.innerHeight - anchor.bottom - MENU_GAP - MENU_EDGE;
+const spaceAbove = anchor.top - MENU_GAP - MENU_EDGE;
+const needed = Math.min(natural, MENU_MIN);
+const preferBelow = anchor.top + anchor.height / 2 < window.innerHeight / 2;
+const below = preferBelow
+? spaceBelow >= needed || spaceBelow >= spaceAbove
+: !(spaceAbove >= needed || spaceAbove >= spaceBelow);
+const room = Math.max(below ? spaceBelow : spaceAbove, 0);
+const height = Math.min(natural, room);
+if (natural > room) modelMenu.style.maxHeight = `${room.toFixed(1)}px`;
 const left = clamp(anchor.right - width, 12, window.innerWidth - width - 12);
 const top = below ? anchor.bottom + MENU_GAP : anchor.top - height - MENU_GAP;
 modelMenu.dataset.side = below ? "below" : "above";
-modelMenu.style.transformOrigin = `${(trigger.left + trigger.width / 2 - left).toFixed(1)}px ${below ? 0 : height}px`;
+modelMenu.style.transformOrigin = `${(trigger.left + trigger.width / 2 - left).toFixed(1)}px ${below ? 0 : height.toFixed(1)}px`;
 modelMenu.style.transform = `translate3d(${left.toFixed(1)}px, ${top.toFixed(1)}px, 0)`;
 }
 
@@ -599,6 +615,7 @@ apiKey = normalizeKey(loadText(API_KEY_KEY));
 applyModel(false);
 applyKey();
 positionMenu();
+modelMenu.scrollTop = 0;
 modelMenu.classList.add("is-open");
 modelTrigger.setAttribute("aria-expanded", "true");
 if (focusFirst) {
@@ -668,49 +685,88 @@ next.focus({ preventScroll: true });
 
 function canTip(target) {
 if (!tooltip || !target || !target.dataset.tooltip) return false;
-if (target.disabled || leaving || drag?.started) return false;
+if (target.disabled || leaving || drag?.started || !body.classList.contains("is-ready")) return false;
 if (menuOpen && target === modelTrigger) return false;
 return isShown(target);
 }
 
 
-function placeTip(target) {
+function placeTip(target, glide) {
 const rect = target.getBoundingClientRect();
 const width = tooltip.offsetWidth;
 const height = tooltip.offsetHeight;
 const above = rect.top - height - TIP_GAP >= 8;
 const left = clamp(rect.left + rect.width / 2 - width / 2, 8, window.innerWidth - width - 8);
 const top = above ? rect.top - height - TIP_GAP : rect.bottom + TIP_GAP;
+tooltip.classList.toggle("is-gliding", Boolean(glide) && !motionPreference.matches);
 tooltip.dataset.side = above ? "above" : "below";
 tooltip.style.transform = `translate3d(${left.toFixed(1)}px, ${top.toFixed(1)}px, 0)`;
 }
 
 
+function setTipText(text, animate) {
+if (tooltipText.textContent === text) return;
+tooltipText.textContent = text;
+if (!animate || motionPreference.matches) return;
+tooltipText.animate(
+[{ opacity: 0, filter: "blur(2px)" }, { opacity: 1, filter: "blur(0px)" }],
+{ duration: 220, easing: GLASS_EASE }
+);
+}
+
+
 function showTip(target) {
+window.clearTimeout(tipTimer);
+window.clearTimeout(tipHideTimer);
 tipTimer = 0;
+tipHideTimer = 0;
 tipPending = null;
-if (!canTip(target)) return;
+if (!canTip(target)) {
+concealTip();
+return;
+}
+const swapping = Boolean(tipTarget) && tooltip.classList.contains("is-visible");
 tipTarget = target;
-tooltip.textContent = target.dataset.tooltip;
-placeTip(target);
+setTipText(target.dataset.tooltip, swapping);
+placeTip(target, swapping);
 tooltip.classList.add("is-visible");
 }
 
 
-function hideTip() {
+function concealTip() {
+window.clearTimeout(tipHideTimer);
+tipHideTimer = 0;
+if (tipTarget) tipHiddenAt = performance.now();
+tipTarget = null;
+tooltip?.classList.remove("is-visible", "is-gliding");
+}
+
+
+function hideTip(immediate = true) {
 window.clearTimeout(tipTimer);
 tipTimer = 0;
 tipPending = null;
-if (tipTarget) tipHiddenAt = performance.now();
-tipTarget = null;
-tooltip?.classList.remove("is-visible");
+if (!tipTarget) return;
+if (immediate) {
+concealTip();
+return;
+}
+window.clearTimeout(tipHideTimer);
+tipHideTimer = window.setTimeout(concealTip, TIP_GRACE);
 }
 
 
 function queueTip(target, immediate) {
-if (target === tipTarget || target === tipPending) return;
+if (target === tipTarget) {
+window.clearTimeout(tipHideTimer);
+tipHideTimer = 0;
+return;
+}
+if (target === tipPending) return;
+window.clearTimeout(tipTimer);
+tipTimer = 0;
+tipPending = null;
 const warm = Boolean(tipTarget) || performance.now() - tipHiddenAt < TIP_WARM;
-hideTip();
 if (immediate || warm) {
 showTip(target);
 return;
@@ -722,19 +778,28 @@ tipTimer = window.setTimeout(() => showTip(target), TIP_DELAY);
 
 function refreshTip(target) {
 if (tipTarget !== target) return;
-tooltip.textContent = target.dataset.tooltip;
-placeTip(target);
+setTipText(target.dataset.tooltip, true);
+placeTip(target, true);
 }
 
 
 function placeNotice() {
 if (!notice) return;
-const rect = box.getBoundingClientRect();
 const width = notice.offsetWidth;
 const height = notice.offsetHeight;
-const above = rect.top > window.innerHeight / 2;
-const left = clamp(rect.left + rect.width / 2 - width / 2, 16, window.innerWidth - width - 16);
-const top = above ? rect.top - height - 12 : rect.bottom + 12;
+const dock = box.getBoundingClientRect();
+const dockBelow = dock.top + dock.height / 2 > window.innerHeight / 2;
+const regionTop = region.ty;
+const regionBottom = region.ty + region.th;
+const fits = region.th >= height + NOTICE_INSET * 2;
+let top;
+if (fits) {
+top = dockBelow ? regionBottom - height - NOTICE_INSET : regionTop + NOTICE_INSET;
+} else {
+top = dockBelow ? dock.top - height - 12 : dock.bottom + 12;
+}
+const center = region.tw > 0 ? region.tx + region.tw / 2 : window.innerWidth / 2;
+const left = clamp(center - width / 2, 16, window.innerWidth - width - 16);
 notice.style.transform = `translate3d(${left.toFixed(1)}px, ${top.toFixed(1)}px, 0)`;
 }
 
@@ -921,7 +986,7 @@ applyFloat(name);
 
 
 if (menuOpen) positionMenu();
-if (tipTarget) placeTip(tipTarget);
+if (tipTarget) placeTip(tipTarget, false);
 if (notice?.classList.contains("is-visible")) placeNotice();
 floatFrame = moving ? window.requestAnimationFrame(stepFloats) : 0;
 if (!floatFrame) floatLast = 0;
@@ -963,7 +1028,7 @@ return;
 versionFade?.cancel();
 versionFade = footer.animate(
 [{ opacity: 1, filter: "blur(0px)" }, { opacity: 0, filter: "blur(4px)" }],
-{ duration: 200, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" }
+{ duration: 220, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" }
 );
 versionFade.onfinish = () => {
 footer.style.transform = versionTransform;
@@ -971,7 +1036,7 @@ versionFade?.cancel();
 versionFade = null;
 footer.animate(
 [{ opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)" }],
-{ duration: 380, easing: GLASS_EASE }
+{ duration: 420, easing: GLASS_EASE }
 );
 };
 }
@@ -1470,6 +1535,7 @@ button.tabIndex = active ? 0 : -1;
 });
 moveBead(switchGlass, deviceButtons, deviceButtons.find(button => button.dataset.device === name), animate);
 updateRegionTarget(animate);
+if (notice?.classList.contains("is-visible")) placeNotice();
 }
 
 
@@ -1509,11 +1575,20 @@ shimmerElements.forEach(element => element.classList.remove("is-releasing"));
 function setChip(text) {
 if (!stateChip || !stateText || stateText.textContent === text) return;
 const from = stateChip.getBoundingClientRect().width;
+chipAnimation?.cancel();
+chipAnimation = null;
 stateText.textContent = text;
-layoutFloats(true);
-if (motionPreference.matches || !body.classList.contains("is-ready")) return;
 const to = stateChip.getBoundingClientRect().width;
-stateChip.animate([{ width: `${from}px` }, { width: `${to}px` }], { duration: 420, easing: GLASS_EASE });
+layoutFloats(true);
+if (motionPreference.matches || !body.classList.contains("is-ready") || Math.abs(to - from) < 0.5) return;
+const growth = stateChip.animate(
+[{ width: `${from.toFixed(1)}px` }, { width: `${to.toFixed(1)}px` }],
+{ duration: 420, easing: GLASS_EASE }
+);
+chipAnimation = growth;
+growth.onfinish = () => {
+if (chipAnimation === growth) chipAnimation = null;
+};
 stateText.animate(
 [{ opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)" }],
 { duration: 360, easing: GLASS_EASE }
@@ -1756,20 +1831,19 @@ return payload.choices?.[0]?.message?.content || payload.data?.choices?.[0]?.mes
 function readChunk(reader, timeoutMs, signal) {
 return new Promise((resolve, reject) => {
 if (signal?.aborted) {
-const abortErr = new DOMException("Aborted", "AbortError");
-reject(abortErr);
+reject(new DOMException("Aborted", "AbortError"));
 return;
 }
+const onAbort = () => {
+cleanup();
+reject(new DOMException("Aborted", "AbortError"));
+};
 const timer = window.setTimeout(() => {
 cleanup();
 const err = new Error("timeout");
 err.code = "STREAM_TIMEOUT";
 reject(err);
 }, timeoutMs);
-const onAbort = () => {
-cleanup();
-reject(new DOMException("Aborted", "AbortError"));
-};
 const cleanup = () => {
 window.clearTimeout(timer);
 signal?.removeEventListener("abort", onAbort);
@@ -1843,8 +1917,7 @@ if (piece) {
 content += piece;
 onContent(content);
 }
-if (choice?.finish_reason) return true;
-return false;
+return Boolean(choice?.finish_reason);
 };
 
 
@@ -1854,11 +1927,8 @@ let chunk;
 try {
 chunk = await readChunk(reader, waitMs, signal);
 } catch (error) {
-if (error?.code === "STREAM_TIMEOUT" && content && hasCompleteClosingTag(content)) {
 reader.cancel().catch(() => null);
-return content;
-}
-reader.cancel().catch(() => null);
+if (error?.code === "STREAM_TIMEOUT" && content && hasCompleteClosingTag(content)) return content;
 throw error;
 }
 const { value, done } = chunk;
@@ -2090,7 +2160,14 @@ const frost = soften.animate([
 { opacity: 0, visibility: "visible", backdropFilter: SOFTEN_CLEAR },
 { opacity: 1, visibility: "visible", backdropFilter: SOFTEN_FROSTED }
 ], { duration: LEAVE_DURATION, easing: FROST_EASE, fill: "forwards" });
-frost.onfinish = () => window.location.assign(homeLink.href);
+let navigated = false;
+const go = () => {
+if (navigated) return;
+navigated = true;
+window.location.assign(homeLink.href);
+};
+frost.onfinish = go;
+window.setTimeout(go, LEAVE_DURATION + 120);
 }
 
 
@@ -2213,7 +2290,7 @@ document.addEventListener("pointerover", event => {
 if (event.pointerType === "touch" || drag?.started) return;
 const target = event.target.closest?.("[data-tooltip]");
 if (!target) {
-if (tipTarget || tipPending) hideTip();
+if (tipTarget || tipPending) hideTip(false);
 return;
 }
 if (target === tipBlocked) return;
@@ -2225,7 +2302,7 @@ document.addEventListener("pointerout", event => {
 const target = event.target.closest?.("[data-tooltip]");
 if (!target || target.contains(event.relatedTarget)) return;
 if (target === tipBlocked) tipBlocked = null;
-if (target === tipTarget || target === tipPending) hideTip();
+if (target === tipTarget || target === tipPending) hideTip(false);
 });
 
 
@@ -2236,7 +2313,7 @@ if (target && target.matches(":focus-visible")) queueTip(target, true);
 
 
 document.addEventListener("focusout", event => {
-if (event.target === tipTarget || event.target === tipPending) hideTip();
+if (event.target === tipTarget || event.target === tipPending) hideTip(false);
 });
 
 
