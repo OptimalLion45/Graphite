@@ -5,12 +5,14 @@ const ctx = canvas?.getContext("2d");
 const regionLabel = document.querySelector(".region-label");
 const regionDevice = regionLabel?.querySelector(".region-label__device");
 const regionSize = regionLabel?.querySelector(".region-label__size");
+const stage = document.querySelector(".stage");
 const site = document.querySelector(".stage-site");
 const hint = document.querySelector(".stage-empty__hint");
 const statusText = document.querySelector(".stage-status__text");
 const statusMeta = document.querySelector(".stage-status__meta");
 const shimmerElements = Array.from(document.querySelectorAll(".shimmer"));
 const projectName = document.querySelector(".project__name");
+const renameInput = document.querySelector(".project__rename");
 const stateChip = document.querySelector(".project__state");
 const stateText = document.querySelector(".project__state-text");
 const footer = document.querySelector(".site-footer");
@@ -36,9 +38,24 @@ const keyState = modelMenu?.querySelector(".model-menu__key-state");
 const tooltip = document.querySelector(".tooltip");
 const tooltipText = tooltip?.querySelector(".tooltip__text") || tooltip;
 const homeLink = document.querySelector(".project__home");
-const deviceSwitch = document.querySelector(".device-switch");
-const switchGlass = deviceSwitch?.querySelector(".device-switch__glass");
-const deviceButtons = Array.from(deviceSwitch?.querySelectorAll(".device-switch__option") ?? []);
+const deviceGroups = Array.from(document.querySelectorAll("[data-device-group]")).map(group => ({
+glass: group.querySelector(".device-switch__glass"),
+buttons: Array.from(group.querySelectorAll(".device-switch__option"))
+}));
+const viewSwitch = document.querySelector(".view-switch");
+const viewGlass = viewSwitch?.querySelector(".view-switch__glass");
+const viewButtons = Array.from(viewSwitch?.querySelectorAll(".view-switch__option") ?? []);
+const fullscreenToggle = viewSwitch?.querySelector(".view-switch__fullscreen");
+const fullscreenBar = document.querySelector(".fullscreen-bar");
+const fullscreenExit = fullscreenBar?.querySelector(".fullscreen-bar__exit");
+const fullscreenPeek = document.querySelector(".fullscreen-peek");
+const codePane = document.querySelector(".code-pane");
+const codeHost = codePane?.querySelector(".code-pane__editor");
+const codeMeta = codePane?.querySelector(".code-pane__meta");
+const codeIssue = codePane?.querySelector(".code-pane__issue");
+const codeIssueText = codeIssue?.querySelector(".code-pane__issue-text");
+const copyButton = codePane?.querySelector("[data-action=\"copy\"]");
+const downloadButton = codePane?.querySelector("[data-action=\"download\"]");
 const soften = document.querySelector(".soften");
 const slotEls = Object.fromEntries(Array.from(document.querySelectorAll(".slot")).map(el => [el.dataset.slot, el]));
 const floats = Object.fromEntries(Array.from(document.querySelectorAll(".float")).map(el => [el.dataset.float, el]));
@@ -60,14 +77,18 @@ this.status = Number(status) || 0;
 
 const API_URL = "https://api.kie.ai/gemini-4-hydrogen-openai/v1/chat/completions";
 const SLOT_NAMES = ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"];
-const ALLOWED = { project: SLOT_NAMES, device: SLOT_NAMES, dock: ["top-center", "bottom-center"] };
-const DEFAULT_LAYOUT = { project: "top-left", device: "top-right", dock: "bottom-center" };
-const COMPACT_LAYOUT = { project: "top-left", dock: "bottom-center" };
+const ALLOWED = { project: SLOT_NAMES, view: SLOT_NAMES, device: SLOT_NAMES, dock: ["top-center", "bottom-center"] };
+const DEFAULT_LAYOUT = { project: "top-left", view: "top-center", device: "top-right", dock: "bottom-center" };
+const COMPACT_LAYOUT = { project: "top-left", view: "top-right", dock: "bottom-center" };
+const PLACEMENT_ORDER = ["dock", "project", "device", "view"];
 const LAYOUT_KEY = "graphite:builder-layout";
 const HANDOFF_KEY = "graphite:handoff";
 const MODEL_KEY = "graphite:model";
 const THINKING_KEY = "graphite:thinking";
 const API_KEY_KEY = "graphite:api-key";
+const VIEWS = ["preview", "split", "code"];
+const UNTITLED = "Untitled site";
+const NAME_LIMIT = 60;
 
 
 const THINKING_LEVELS = [
@@ -112,6 +133,48 @@ const PREVIEW_GUARD = [
 "(() => {",
 " if (window.__graphiteGuard) return;",
 " window.__graphiteGuard = true;",
+" let reported = false;",
+" const report = (message, line) => {",
+" if (reported) return;",
+" reported = true;",
+" try { parent.postMessage({ graphite: 'error', message: String(message || 'Script error'), line: Number(line) || 0 }, '*'); } catch (e) {}",
+" };",
+" window.addEventListener('error', event => {",
+" if (event.lineno) report(event.message, event.lineno);",
+" });",
+" window.addEventListener('unhandledrejection', event => {",
+" const reason = event.reason;",
+" report(reason && reason.message ? reason.message : reason, 0);",
+" });",
+" const memoryStorage = () => {",
+" const data = new Map();",
+" return {",
+" get length() { return data.size; },",
+" key: index => Array.from(data.keys())[index] ?? null,",
+" getItem: key => (data.has(String(key)) ? data.get(String(key)) : null),",
+" setItem: (key, value) => { data.set(String(key), String(value)); },",
+" removeItem: key => { data.delete(String(key)); },",
+" clear: () => { data.clear(); }",
+" };",
+" };",
+" ['localStorage', 'sessionStorage'].forEach(name => {",
+" try { if (window[name]) return; } catch (e) {}",
+" try { Object.defineProperty(window, name, { value: memoryStorage(), configurable: true }); } catch (e) {}",
+" });",
+" try { void document.cookie; } catch (e) {",
+" const jar = new Map();",
+" try {",
+" Object.defineProperty(document, 'cookie', {",
+" configurable: true,",
+" get: () => Array.from(jar, ([key, value]) => key + '=' + value).join('; '),",
+" set: value => {",
+" const pair = String(value).split(';')[0];",
+" const split = pair.indexOf('=');",
+" if (split > 0) jar.set(pair.slice(0, split).trim(), pair.slice(split + 1).trim());",
+" }",
+" });",
+" } catch (err) {}",
+" }",
 " const toSlug = value => String(value || '')",
 " .replace(/^#/, '')",
 " .replace(/[?].*$/, '')",
@@ -131,7 +194,7 @@ const PREVIEW_GUARD = [
 " };",
 " const isHidden = el => Boolean(el) && (el.hidden || getComputedStyle(el).display === 'none');",
 " const findBySlug = slug => {",
-" if (!slug) return null;",
+" if (!slug || slug.length < 2) return null;",
 " const direct = document.getElementById(slug);",
 " if (direct) return direct;",
 " const attrs = ['data-tab', 'data-page', 'data-view', 'data-section', 'data-panel'];",
@@ -146,6 +209,7 @@ const PREVIEW_GUARD = [
 " const heading = el.querySelector('h1, h2, h3');",
 " if (heading && toSlug(heading.textContent) === slug) return el;",
 " }",
+" if (slug.length < 4) return null;",
 " for (const el of document.querySelectorAll('section, article, [id]')) {",
 " if (el.id && toSlug(el.id).includes(slug)) return el;",
 " const heading = el.querySelector('h1, h2, h3');",
@@ -278,6 +342,7 @@ const PREVIEW_GUARD = [
 " }",
 " if (!raw || raw === '#') {",
 " if (link.hasAttribute('onclick') || link.dataset.tab || link.dataset.page || link.dataset.view || link.dataset.toggle || link.dataset.bsToggle) return;",
+" if (!link.closest('nav, header, footer, [role=\"navigation\"], [role=\"tablist\"], .nav, .menu, .tabs')) return;",
 " const byLabel = findBySlug(toSlug(link.textContent));",
 " if (byLabel) {",
 " activateTarget(byLabel, link);",
@@ -297,6 +362,7 @@ const PREVIEW_GUARD = [
 "})();",
 "<\/script>"
 ].join("\n");
+const GUARD_LINES = PREVIEW_GUARD.split("\n").length - 1;
 
 
 const EDGE = 20;
@@ -321,6 +387,15 @@ const LIVE_MIN = 1400;
 const REVEAL_FALLBACK = 900;
 const CHUNK_TIMEOUT = 60000;
 const COMPLETE_IDLE = 1800;
+const SPLIT_RATIO = 0.46;
+const SPLIT_GAP = 16;
+const PANE_SHIFT = 28;
+const FULL_INSET = 24;
+const FULL_SETTLE = 700;
+const PEEK_IDLE = 2600;
+const CODE_SYNC = 650;
+const STREAM_STEP = 140;
+const COPY_RESET = 1600;
 
 
 const DEVICES = {
@@ -371,12 +446,26 @@ const normalizeKey = value => String(value || "").trim().replace(/^Bearer\s+/i, 
 
 let state = "idle";
 let device = "desktop";
+let view = "preview";
 let layout = loadLayout();
 let modelId = loadChoice(MODEL_KEY, MODELS.map(model => model.id), MODELS[0].id);
 let thinkingId = loadChoice(THINKING_KEY, currentModel().thinking, currentModel().defaultThinking);
 let apiKey = normalizeKey(loadText(API_KEY_KEY));
 let siteHtml = "";
+let siteName = "";
+let nameLocked = false;
+let renaming = false;
 let loadingHtml = "";
+let streamHtml = "";
+let streamTimer = 0;
+let codeTimer = 0;
+let copyTimer = 0;
+let editor = null;
+let editorPending = false;
+let fullscreen = false;
+let nativeFullscreen = false;
+let fullscreenAt = 0;
+let peekTimer = 0;
 let revealTimer = 0;
 let frameSettled = false;
 let history = [];
@@ -419,6 +508,7 @@ springs[name] = { x: 0, y: 0, w: 0, vx: 0, vy: 0, vw: 0, tx: 0, ty: 0, tw: 0, re
 
 
 const region = { x: 0, y: 0, w: 0, h: 0, tx: 0, ty: 0, tw: 0, th: 0, ready: false };
+const pane = { x: 0, y: 0, w: 0, h: 0, tx: 0, ty: 0, tw: 0, th: 0, ready: false, visible: false };
 
 
 const field = {
@@ -470,18 +560,27 @@ return;
 
 
 function loadLayout() {
+let saved = null;
 try {
-const saved = JSON.parse(loadText(LAYOUT_KEY) || "null");
-if (!saved) return { ...DEFAULT_LAYOUT };
-const next = { ...DEFAULT_LAYOUT };
-Object.keys(DEFAULT_LAYOUT).forEach(name => {
-if (ALLOWED[name].includes(saved[name])) next[name] = saved[name];
-});
-const used = Object.values(next);
-return new Set(used).size === used.length ? next : { ...DEFAULT_LAYOUT };
+saved = JSON.parse(loadText(LAYOUT_KEY) || "null");
 } catch (error) {
-return { ...DEFAULT_LAYOUT };
+saved = null;
 }
+const next = {};
+const used = new Set();
+PLACEMENT_ORDER.forEach(name => {
+const slot = saved?.[name];
+if (!ALLOWED[name].includes(slot) || used.has(slot)) return;
+next[name] = slot;
+used.add(slot);
+});
+PLACEMENT_ORDER.forEach(name => {
+if (next[name]) return;
+const slot = [DEFAULT_LAYOUT[name], ...ALLOWED[name]].find(option => !used.has(option));
+next[name] = slot;
+used.add(slot);
+});
+return next;
 }
 
 
@@ -504,10 +603,7 @@ glass.animate([
 { transform: `translateX(${middle}px) scaleX(1.16)`, offset: 0.42, easing: GLASS_EASE },
 { transform: `translateX(${to}px) scaleX(1)` }
 ], { duration: 460 });
-}
-
-
-function applyModel(animate = false) {
+} function applyModel(animate = false) {
 const model = currentModel();
 const level = levelFor(thinkingId);
 const prevLevel = modelLevel?.dataset.level;
@@ -635,7 +731,7 @@ if (returnFocus) modelTrigger.focus({ preventScroll: true });
 
 
 function stepFocus(items, current, step) {
-const visible = items.filter(item => !item.hidden);
+const visible = items.filter(item => !item.hidden && isShown(item));
 const position = visible.indexOf(current);
 return visible[(position + step + visible.length) % visible.length];
 }
@@ -687,7 +783,8 @@ function canTip(target) {
 if (!tooltip || !target || !target.dataset.tooltip) return false;
 if (target.disabled || leaving || drag?.started || !body.classList.contains("is-ready")) return false;
 if (menuOpen && target === modelTrigger) return false;
-return isShown(target);
+if (renaming && target === projectName) return false;
+return isShown(target) && getComputedStyle(target).visibility !== "hidden";
 }
 
 
@@ -852,7 +949,8 @@ return bands;
 function dockWidthFor(band, current) {
 if (compactQuery.matches) return window.innerWidth - 24;
 let side = 0;
-["project", "device"].forEach(name => {
+Object.keys(floats).forEach(name => {
+if (name === "dock") return;
 const slot = current[name];
 if (!slot || !isShown(floats[name])) return;
 const [slotBand, slotSide] = slot.split("-");
@@ -888,7 +986,7 @@ if (name === "dock" && spring.w > 0) box.style.width = `${spring.w.toFixed(2)}px
 }
 
 
-function layoutFloats(animate = true) {
+function layoutFloats(animate = true, regionAnimate = animate) {
 const current = activeLayout();
 const instant = !animate || motionPreference.matches;
 const bands = measureBands(current);
@@ -923,7 +1021,8 @@ areaCy = (areaTop + window.innerHeight - areaBottom) / 2;
 body.style.setProperty("--area-cy", `${areaCy.toFixed(1)}px`);
 updateCopy();
 placeVersion(current, !instant);
-updateRegionTarget(!instant);
+updateRegionTarget(regionAnimate && !motionPreference.matches);
+if (renaming) placeRename();
 if (menuOpen) positionMenu();
 if (notice?.classList.contains("is-visible")) placeNotice();
 if (!instant) requestFloats();
@@ -1039,10 +1138,7 @@ footer.animate(
 { duration: 420, easing: GLASS_EASE }
 );
 };
-}
-
-
-function placeSlotGhosts(name) {
+} function placeSlotGhosts(name) {
 const el = floats[name];
 const height = el.offsetHeight;
 const bands = measureBands(layout, name);
@@ -1181,7 +1277,7 @@ layoutFloats(true);
 
 Object.entries(floats).forEach(([name, el]) => {
 el.addEventListener("pointerdown", event => {
-if (compactQuery.matches || event.button !== 0 || drag || leaving) return;
+if (compactQuery.matches || event.button !== 0 || drag || leaving || fullscreen) return;
 if (event.target.closest("input, .model-trigger")) return;
 if (name === "dock" && !event.target.closest(".dock__grip")) return;
 drag = {
@@ -1221,28 +1317,90 @@ grip?.addEventListener("dblclick", resetLayout);
 
 
 function effectiveDevice() {
-return compactQuery.matches ? "desktop" : device;
+if (compactQuery.matches) return "desktop";
+if (device === "desktop" && effectiveView() === "split") return "tablet";
+return device;
+}
+
+
+function workspaceOpen() {
+return body.classList.contains("has-site") || state === "building";
+}
+
+
+function effectiveView() {
+if (fullscreen || !workspaceOpen()) return "preview";
+if (view === "split" && compactQuery.matches) return "preview";
+return view;
+}
+
+
+function stageBounds() {
+if (fullscreen) return { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
+const side = compactQuery.matches ? 16 : 64;
+return {
+x: side,
+y: areaTop,
+w: Math.max(0, window.innerWidth - side * 2),
+h: Math.max(0, window.innerHeight - areaTop - areaBottom)
+};
+}
+
+
+function fitBox(bounds, width, height) {
+const w = Math.min(width, bounds.w);
+const h = Math.min(height, bounds.h);
+return { x: bounds.x + (bounds.w - w) / 2, y: bounds.y + (bounds.h - h) / 2, w, h };
+}
+
+
+function setBox(target, next, animate) {
+target.tx = next.x;
+target.ty = next.y;
+target.tw = next.w;
+target.th = next.h;
+if (animate && target.ready && !motionPreference.matches) return;
+target.x = next.x;
+target.y = next.y;
+target.w = next.w;
+target.h = next.h;
+target.ready = true;
 }
 
 
 function updateRegionTarget(animate = true) {
-const side = compactQuery.matches ? 16 : 64;
-const availableW = Math.max(0, window.innerWidth - side * 2);
-const availableH = Math.max(0, window.innerHeight - areaTop - areaBottom);
+const mode = effectiveView();
+const bounds = stageBounds();
 const preset = DEVICES[effectiveDevice()];
-const width = Math.min(preset.width, availableW);
-const height = Math.min(preset.height, availableH);
-region.tx = (window.innerWidth - width) / 2;
-region.ty = areaTop + (availableH - height) / 2;
-region.tw = width;
-region.th = height;
-if (!animate || !region.ready || motionPreference.matches) {
-region.x = region.tx;
-region.y = region.ty;
-region.w = region.tw;
-region.h = region.th;
-region.ready = true;
+const edge = fullscreen && effectiveDevice() === "desktop";
+let frameBounds = bounds;
+let codeBox = null;
+if (mode === "split") {
+const codeWidth = Math.round(Math.max(0, bounds.w - SPLIT_GAP) * SPLIT_RATIO);
+codeBox = { x: bounds.x, y: bounds.y, w: codeWidth, h: bounds.h };
+frameBounds = { x: bounds.x + codeWidth + SPLIT_GAP, y: bounds.y, w: Math.max(0, bounds.w - codeWidth - SPLIT_GAP), h: bounds.h };
+} else if (mode === "code") {
+codeBox = fitBox(bounds, DEVICES.desktop.width, Infinity);
+} else if (fullscreen && !edge) {
+frameBounds = {
+x: FULL_INSET,
+y: FULL_INSET,
+w: Math.max(0, bounds.w - FULL_INSET * 2),
+h: Math.max(0, bounds.h - FULL_INSET * 2)
+};
 }
+const frame = mode === "code" ? codeBox : edge ? bounds : fitBox(frameBounds, preset.width, preset.height);
+setBox(region, frame, animate);
+if (codeBox) {
+if (!pane.visible) setBox(pane, { ...codeBox, x: codeBox.x - PANE_SHIFT }, false);
+setBox(pane, codeBox, animate);
+} else if (pane.visible) {
+setBox(pane, { x: pane.tx - PANE_SHIFT, y: pane.ty, w: pane.tw, h: pane.th }, animate);
+}
+pane.visible = Boolean(codeBox);
+site.classList.toggle("is-edge", edge);
+const shift = mode === "split" ? region.tx + region.tw / 2 - window.innerWidth / 2 : 0;
+stage?.style.setProperty("--stage-shift", `${shift.toFixed(1)}px`);
 if (regionDevice) regionDevice.textContent = preset.label;
 requestField();
 }
@@ -1261,6 +1419,11 @@ if (regionSize.textContent !== text) regionSize.textContent = text;
 site.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
 site.style.width = `${region.w.toFixed(1)}px`;
 site.style.height = `${region.h.toFixed(1)}px`;
+if (!codePane || !pane.ready) return;
+codePane.style.left = `${pane.x.toFixed(1)}px`;
+codePane.style.top = `${pane.y.toFixed(1)}px`;
+codePane.style.width = `${pane.w.toFixed(1)}px`;
+codePane.style.height = `${pane.h.toFixed(1)}px`;
 }
 
 
@@ -1350,7 +1513,7 @@ ctx.closePath();
 }
 
 
-function drawRegion(left, top, width, height) {
+function drawRegion(left, top, width, height, marks) {
 if (width < 4 || height < 4) return;
 roundedRect(left, top, width, height, 14);
 ctx.globalAlpha = 0.16;
@@ -1362,7 +1525,7 @@ ctx.lineWidth = 1;
 ctx.stroke();
 
 
-if (compactQuery.matches) return;
+if (!marks || compactQuery.matches) return;
 const l = left - MARK_OFFSET;
 const t = top - MARK_OFFSET;
 const r = left + width + MARK_OFFSET;
@@ -1410,11 +1573,16 @@ region.x += (region.tx - region.x) * ease(8);
 region.y += (region.ty - region.y) * ease(8);
 region.w += (region.tw - region.w) * ease(8);
 region.h += (region.th - region.h) * ease(8);
+pane.x += (pane.tx - pane.x) * ease(8);
+pane.y += (pane.ty - pane.y) * ease(8);
+pane.w += (pane.tw - pane.w) * ease(8);
+pane.h += (pane.th - pane.h) * ease(8);
 if (!reduced) field.time += delta;
 
 
 ctx.clearRect(0, 0, field.w, field.h);
-drawRegion(region.x, region.y, region.w, region.h);
+const framed = !site.classList.contains("is-edge") && effectiveView() !== "code";
+if (framed) drawRegion(region.x, region.y, region.w, region.h, !fullscreen);
 
 
 const strength = reduced ? 0 : field.strength;
@@ -1424,7 +1592,7 @@ const top = region.y;
 const right = region.x + region.w;
 const bottom = region.y + region.h;
 const cx = field.w / 2;
-const clearing = !siteHtml;
+const clearing = !body.classList.contains("has-site");
 const scale = field.spriteScale;
 const { bx, by, ox, oy, lift } = field;
 let moving = false;
@@ -1463,7 +1631,7 @@ moving = true;
 
 
 const edge = Math.min(baseX - left, right - baseX, baseY - top, bottom - baseY);
-const inside = clamp(edge / 14 + 0.5, 0, 1);
+const inside = framed ? clamp(edge / 14 + 0.5, 0, 1) : 0;
 let alpha = 0.14 + 0.2 * inside;
 
 
@@ -1511,6 +1679,10 @@ Math.abs(region.tx - region.x) < 0.2 &&
 Math.abs(region.ty - region.y) < 0.2 &&
 Math.abs(region.tw - region.w) < 0.2 &&
 Math.abs(region.th - region.h) < 0.2 &&
+Math.abs(pane.tx - pane.x) < 0.2 &&
+Math.abs(pane.ty - pane.y) < 0.2 &&
+Math.abs(pane.tw - pane.w) < 0.2 &&
+Math.abs(pane.th - pane.h) < 0.2 &&
 !building &&
 field.build < 0.002;
 
@@ -1520,6 +1692,31 @@ field.last = 0;
 return;
 }
 field.frame = window.requestAnimationFrame(drawField);
+} function syncDeviceButtons(animate) {
+const current = effectiveDevice();
+deviceGroups.forEach(group => {
+let activeButton = null;
+group.buttons.forEach(button => {
+const active = button.dataset.device === current;
+button.classList.toggle("is-active", active);
+button.setAttribute("aria-checked", String(active));
+button.tabIndex = active ? 0 : -1;
+if (active) activeButton = button;
+});
+moveBead(group.glass, group.buttons.filter(isShown), activeButton, animate);
+});
+}
+
+
+function settleDeviceSwitch() {
+if (motionPreference.matches || !floats.device || !isShown(floats.device)) return;
+floats.device.querySelectorAll(".device-switch__option").forEach(button => {
+if (!isShown(button)) return;
+button.animate(
+[{ opacity: 0, transform: "scale(0.88)" }, { opacity: 1, transform: "scale(1)" }],
+{ duration: 380, easing: GLASS_EASE }
+);
+});
 }
 
 
@@ -1527,30 +1724,482 @@ function setDevice(name, animate = true) {
 if (!DEVICES[name]) return;
 device = name;
 body.dataset.device = name;
-deviceButtons.forEach(button => {
-const active = button.dataset.device === name;
-button.classList.toggle("is-active", active);
-button.setAttribute("aria-checked", String(active));
-button.tabIndex = active ? 0 : -1;
-});
-moveBead(switchGlass, deviceButtons, deviceButtons.find(button => button.dataset.device === name), animate);
+syncDeviceButtons(animate);
 updateRegionTarget(animate);
 if (notice?.classList.contains("is-visible")) placeNotice();
 }
 
 
-deviceButtons.forEach((button, buttonIndex) => {
-button.addEventListener("click", () => setDevice(button.dataset.device));
-button.addEventListener("keydown", event => {
+function onRadioKey(event, items, select) {
 const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
 if (!step) return;
 event.preventDefault();
-const next = deviceButtons[(buttonIndex + step + deviceButtons.length) % deviceButtons.length];
-setDevice(next.dataset.device);
+const next = stepFocus(items, event.currentTarget, step);
+if (!next) return;
+select(next);
 next.focus();
+}
+
+
+deviceGroups.forEach(group => {
+group.buttons.forEach(button => {
+button.addEventListener("click", () => setDevice(button.dataset.device));
+button.addEventListener("keydown", event => onRadioKey(event, group.buttons, next => setDevice(next.dataset.device)));
 });
 });
+
+
+function spanBead(glass, buttons, active, animate) {
+if (!glass || !buttons.length || !active.length) return;
+const first = active[0];
+const last = active[active.length - 1];
+const to = first.offsetLeft - buttons[0].offsetLeft;
+const width = last.offsetLeft + last.offsetWidth - first.offsetLeft;
+const from = parseFloat(glass.dataset.x);
+const fromWidth = parseFloat(glass.dataset.w);
+glass.dataset.x = String(to);
+glass.dataset.w = String(width);
+glass.style.width = `${width}px`;
+glass.style.transform = `translateX(${to}px)`;
+if (!animate || motionPreference.matches || Number.isNaN(from) || Number.isNaN(fromWidth)) return;
+if (from === to && fromWidth === width) return;
+glass.animate([
+{ transform: `translateX(${from}px)`, width: `${fromWidth}px` },
+{ transform: `translateX(${to}px)`, width: `${width}px` }
+], { duration: 460, easing: GLASS_EASE });
+}
+
+
+function panelsFor(mode) {
+return mode === "split" ? ["preview", "code"] : [mode];
+}
+
+
+function viewTip(name, mode) {
+const label = name === "code" ? "code" : "preview";
+if (!panelsFor(mode).includes(name)) return `Show ${label}`;
+if (mode === "split") return `Hide ${label}`;
+return name === "code" ? "Code" : "Preview";
+}
+
+
+function applyView(animate = true) {
+const mode = effectiveView();
+const previous = body.dataset.view;
+const panels = panelsFor(mode);
+body.dataset.view = mode;
+viewButtons.forEach(button => {
+const active = panels.includes(button.dataset.view);
+button.classList.toggle("is-active", active);
+button.setAttribute("aria-pressed", String(active));
+button.dataset.tooltip = viewTip(button.dataset.view, mode);
+refreshTip(button);
+});
+spanBead(viewGlass, viewButtons, viewButtons.filter(button => panels.includes(button.dataset.view)), animate);
+if (mode !== "preview") {
+ensureEditor();
+syncEditor();
+}
+if (previous === mode) return;
+syncDeviceButtons(false);
+if (animate && (previous === "split") !== (mode === "split")) settleDeviceSwitch();
+layoutFloats(animate);
+}
+
+
+function setView(name) {
+if (!VIEWS.includes(name) || !workspaceOpen()) return;
+view = name;
+applyView(true);
+}
+
+
+function toggleView(name) {
+if (!workspaceOpen()) return;
+if (compactQuery.matches) {
+setView(name);
+return;
+}
+const panels = panelsFor(effectiveView());
+if (!panels.includes(name)) {
+setView("split");
+} else if (panels.length > 1) {
+setView(name === "code" ? "preview" : "code");
+}
+}
+
+
+viewButtons.forEach(button => {
+button.addEventListener("click", () => toggleView(button.dataset.view));
+});
+
+
+function canFullscreen() {
+return Boolean(siteHtml) && body.classList.contains("has-site") && state !== "building" && !leaving;
+}
+
+
+function requestNativeFullscreen() {
+const root = document.documentElement;
+const request = root.requestFullscreen || root.webkitRequestFullscreen;
+if (!request || document.fullscreenElement || document.webkitFullscreenElement) return;
+try {
+request.call(root, { navigationUI: "hide" })?.catch?.(() => null);
+} catch (error) {
+nativeFullscreen = false;
+}
+}
+
+
+function exitNativeFullscreen() {
+const exit = document.exitFullscreen || document.webkitExitFullscreen;
+if (!exit || !(document.fullscreenElement || document.webkitFullscreenElement)) return;
+try {
+exit.call(document)?.catch?.(() => null);
+} catch (error) {
+nativeFullscreen = false;
+}
+}
+
+
+function onNativeFullscreen() {
+const active = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+const wasNative = nativeFullscreen;
+nativeFullscreen = active;
+if (!active && wasNative && fullscreen) setFullscreen(false);
+}
+
+
+function revealBar() {
+if (!fullscreen || !fullscreenBar) return;
+fullscreenBar.classList.add("is-visible");
+queueConceal();
+}
+
+
+function queueConceal() {
+window.clearTimeout(peekTimer);
+peekTimer = window.setTimeout(() => {
+peekTimer = 0;
+if (!fullscreen) return;
+if (fullscreenBar.matches(":hover") || fullscreenBar.querySelector(":focus-visible")) {
+queueConceal();
+return;
+}
+concealBar();
+}, PEEK_IDLE);
+}
+
+
+function concealBar() {
+window.clearTimeout(peekTimer);
+peekTimer = 0;
+fullscreenBar?.classList.remove("is-visible");
+if (tipTarget && fullscreenBar?.contains(tipTarget)) hideTip();
+}
+
+
+function setFullscreen(next) {
+if (next === fullscreen || (next && !canFullscreen())) return;
+const returnFocus = next ? document.activeElement === fullscreenToggle : Boolean(fullscreenBar?.contains(document.activeElement));
+if (renaming) finishRename(true);
+fullscreen = next;
+fullscreenAt = performance.now();
+closeMenu();
+hideTip();
+hideNotice();
+flushCode();
+body.classList.toggle("is-fullscreen", next);
+if (next) {
+syncDeviceButtons(false);
+requestNativeFullscreen();
+revealBar();
+if (returnFocus) fullscreenExit?.focus({ preventScroll: true });
+} else {
+concealBar();
+exitNativeFullscreen();
+if (returnFocus) fullscreenToggle?.focus({ preventScroll: true });
+}
+applyView(true);
+layoutFloats(true);
+}
+
+
+function cleanName(value) {
+const text = String(value || "").replace(/\s+/g, " ").trim().slice(0, NAME_LIMIT).trim();
+return text.toLowerCase() === UNTITLED.toLowerCase() ? "" : text;
+}
+
+
+function displayName() {
+return siteName || UNTITLED;
+}
+
+
+function placeRename() {
+if (!projectName || !renameInput) return;
+const inset = parseFloat(getComputedStyle(renameInput).paddingLeft) || 0;
+renameInput.style.left = `${projectName.offsetLeft - inset}px`;
+renameInput.style.width = `${Math.max(projectName.offsetWidth, 24) + inset * 2}px`;
+}
+
+
+function renderName() {
+if (!projectName) return false;
+const text = renaming ? (renameInput.value.replace(/\s+/g, " ") || UNTITLED) : displayName();
+projectName.setAttribute("aria-label", `Rename site, ${displayName()}`);
+const changed = projectName.textContent !== text;
+if (changed) projectName.textContent = text;
+if (renaming) placeRename();
+return changed;
+}
+
+
+function setSiteName(name, locked) {
+siteName = cleanName(name);
+nameLocked = Boolean(locked && siteName);
+if (renderName()) layoutFloats(true);
+}
+
+
+function startRename() {
+if (!projectName || !renameInput || renaming || leaving || fullscreen) return;
+renaming = true;
+hideTip();
+closeMenu();
+renameInput.value = siteName;
+renameInput.tabIndex = 0;
+floats.project.classList.add("is-renaming");
+if (renderName()) layoutFloats(true);
+placeRename();
+renameInput.focus({ preventScroll: true });
+const end = renameInput.value.length;
+renameInput.setSelectionRange(end, end);
+}
+
+
+function finishRename(commit) {
+if (!renaming) return;
+renaming = false;
+floats.project.classList.remove("is-renaming");
+renameInput.tabIndex = -1;
+if (commit) {
+const next = cleanName(renameInput.value);
+if (next !== siteName || !next) {
+siteName = next;
+nameLocked = Boolean(next);
+}
+}
+if (renderName()) layoutFloats(true);
+}
+
+
+function currentCode() {
+return state === "building" && streamHtml ? streamHtml : siteHtml;
+}
+
+
+function updateCodeMeta() {
+if (!codeMeta) return;
+const text = currentCode();
+if (!text) {
+codeMeta.textContent = state === "building" ? "Writing\u2026" : "";
+return;
+}
+const lines = text.split("\n").length;
+codeMeta.textContent = `${lines.toLocaleString()} ${lines === 1 ? "line" : "lines"} \u00b7 ${formatSize(text.length)}`;
+}
+
+
+function syncEditor() {
+window.clearTimeout(streamTimer);
+streamTimer = 0;
+updateCodeMeta();
+if (!editor) return;
+const building = state === "building";
+editor.setReadOnly(building);
+editor.setValue(currentCode(), building && Boolean(streamHtml));
+}
+
+
+function ensureEditor() {
+if (editor || editorPending || !codeHost || !window.GraphiteEditor) return;
+editorPending = true;
+codePane?.classList.add("is-loading");
+window.GraphiteEditor.create(codeHost, { readOnly: state === "building", onChange: onCodeEdit }).then(instance => {
+editor = instance;
+editorPending = false;
+codePane?.classList.remove("is-loading");
+syncEditor();
+});
+}
+
+
+function preloadEditor() {
+const run = () => window.GraphiteEditor?.preload();
+if (window.requestIdleCallback) {
+window.requestIdleCallback(run, { timeout: 4000 });
+} else {
+window.setTimeout(run, 1200);
+}
+}
+
+
+function streamCode(html) {
+streamHtml = html;
+if (streamTimer) return;
+streamTimer = window.setTimeout(() => {
+streamTimer = 0;
+if (state !== "building") return;
+updateCodeMeta();
+if (editor && body.dataset.view !== "preview") editor.setValue(streamHtml, true);
+}, STREAM_STEP);
+}
+
+
+function onCodeEdit(value) {
+if (state === "building") return;
+siteHtml = value;
+updateCodeMeta();
+updateCopy();
+syncControls();
+window.clearTimeout(codeTimer);
+codeTimer = window.setTimeout(flushCode, CODE_SYNC);
+}
+
+
+function flushCode() {
+if (!codeTimer) return;
+window.clearTimeout(codeTimer);
+codeTimer = 0;
+const frame = site.querySelector(".stage-site__frame");
+if (!frame || loadingHtml) return;
+clearIssue();
+frameSettled = false;
+frame.srcdoc = preparePreviewHtml(siteHtml);
+}
+
+
+function clearIssue() {
+if (!codeIssue || codeIssue.hidden) return;
+codeIssue.hidden = true;
+if (tipTarget === codeIssue) hideTip();
+}
+
+
+function showIssue(message, line) {
+if (!codeIssue || !codeIssueText) return;
+const text = line ? `Line ${line}: ${message}` : message;
+codeIssue.dataset.line = String(line);
+codeIssue.dataset.tooltip = line ? "Show in code" : "Script error";
+codeIssue.setAttribute("aria-label", `Script error. ${text}`);
+codeIssueText.textContent = text;
+codeIssue.hidden = false;
+if (body.dataset.view !== "preview") return;
+showNotice(line ? `The site's script hit an error on line ${line}. Open Code to see it.` : "The site's script hit an error. Open Code to see it.");
+}
+
+
+function onPreviewMessage(event) {
+const frame = site.querySelector(".stage-site__frame");
+if (!frame || event.source !== frame.contentWindow || event.data?.graphite !== "error") return;
+const reported = Number(event.data.line) || 0;
+const line = reported > GUARD_LINES ? reported - GUARD_LINES : 0;
+showIssue(String(event.data.message || "Script error").slice(0, 160), line);
+}
+
+
+function revealIssue() {
+const line = Number(codeIssue?.dataset.line) || 0;
+if (line) editor?.revealLine(line);
+}
+
+
+window.addEventListener("message", onPreviewMessage);
+codeIssue?.addEventListener("click", revealIssue);
+
+
+async function writeClipboard(text) {
+if (navigator.clipboard?.writeText) {
+const copied = await navigator.clipboard.writeText(text).then(() => true, () => false);
+if (copied) return true;
+}
+const focused = document.activeElement;
+const area = document.createElement("textarea");
+area.value = text;
+area.setAttribute("readonly", "");
+area.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;-webkit-user-select:text;user-select:text;";
+document.body.append(area);
+area.select();
+let copied = false;
+try {
+copied = document.execCommand("copy");
+} catch (error) {
+copied = false;
+}
+area.remove();
+focused?.focus?.({ preventScroll: true });
+return copied;
+}
+
+
+async function copyCode() {
+if (!copyButton || copyButton.disabled) return;
+const text = editor ? editor.getValue() : siteHtml;
+if (!text) return;
+const copied = await writeClipboard(text);
+if (!copied) {
+showNotice("Couldn't copy the code. Select it in the editor and copy it manually.");
+return;
+}
+window.clearTimeout(copyTimer);
+copyButton.classList.add("is-done");
+copyButton.dataset.tooltip = "Copied";
+refreshTip(copyButton);
+copyTimer = window.setTimeout(() => {
+copyTimer = 0;
+copyButton.classList.remove("is-done");
+copyButton.dataset.tooltip = "Copy code";
+refreshTip(copyButton);
+}, COPY_RESET);
+}
+
+
+function slugify(value) {
+return String(value || "")
+.toLowerCase()
+.normalize("NFKD")
+.replace(/[\u0300-\u036f]/g, "")
+.replace(/[^a-z0-9]+/g, "-")
+.replace(/^-+|-+$/g, "")
+.slice(0, 48);
+}
+
+
+function downloadCode() {
+if (!downloadButton || downloadButton.disabled) return;
+const text = editor ? editor.getValue() : siteHtml;
+if (!text) return;
+const url = URL.createObjectURL(new Blob([text], { type: "text/html;charset=utf-8" }));
+const link = document.createElement("a");
+link.href = url;
+link.download = `${slugify(displayName()) || "graphite-site"}.html`;
+document.body.append(link);
+link.click();
+link.remove();
+window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+
+function syncControls() {
+const building = state === "building";
+const empty = !siteHtml;
+if (fullscreenToggle) fullscreenToggle.disabled = !canFullscreen();
+if (copyButton) copyButton.disabled = building || empty;
+if (downloadButton) downloadButton.disabled = building || empty;
+if (tipTarget?.disabled) hideTip();
+}
 
 
 function restartShimmer() {
@@ -1592,17 +2241,7 @@ if (chipAnimation === growth) chipAnimation = null;
 stateText.animate(
 [{ opacity: 0, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)" }],
 { duration: 360, easing: GLASS_EASE }
-);
-}
-
-
-function setProjectName(name) {
-if (!projectName) return;
-const next = name || "Untitled site";
-if (projectName.textContent === next) return;
-projectName.textContent = next;
-layoutFloats(true);
-}
+); }
 
 
 function render() {
@@ -1616,6 +2255,7 @@ action.dataset.tooltip = label;
 refreshTip(action);
 if (modelTrigger) modelTrigger.disabled = building || leaving;
 if (modelTrigger?.disabled && tipTarget === modelTrigger) hideTip();
+syncControls();
 }
 
 
@@ -1715,17 +2355,22 @@ swapStatusText(next);
 function setState(next) {
 if (!STATE_LABELS[next]) return;
 const wasBuilding = state === "building";
-if (next !== "building") stopStatus();
+if (next === "building") {
+clearIssue();
+} else {
+stopStatus();
+streamHtml = "";
+}
 if (wasBuilding && next !== "building") releaseShimmer();
 state = next;
 body.dataset.state = next;
 setChip(next === "building" && siteHtml ? "Updating" : STATE_LABELS[next]);
 render();
+applyView(true);
+syncEditor();
+layoutFloats(true);
 requestField();
-}
-
-
-function splitThoughts(text) {
+} function splitThoughts(text) {
 let thought = "";
 let rest = text.replace(/<thought>([\s\S]*?)<\/thought>/gi, (match, inner) => {
 thought += inner;
@@ -2023,11 +2668,12 @@ loadingHtml = "";
 if (state !== "building") return;
 siteHtml = html;
 body.classList.add("has-site");
-setProjectName(titleOf(html));
+if (!nameLocked) setSiteName(titleOf(html), false);
 input.value = "";
 setMeta("");
 setState("ready");
 updateCopy();
+preloadEditor();
 }
 
 
@@ -2093,6 +2739,7 @@ const size = parts.html.trim().length;
 if (!size) return;
 queueLive(working);
 setMeta(`${formatSize(size)} written`);
+streamCode(parts.html.trimStart().replace(/^```(?:html)?\s*/i, ""));
 };
 
 
@@ -2123,6 +2770,8 @@ return;
 }
 closeMenu();
 hideNotice();
+flushCode();
+streamHtml = "";
 setState("building");
 setMeta("");
 startStatus(siteHtml ? 0 : step, siteHtml ? editMessages : statusMessages);
@@ -2277,9 +2926,56 @@ button.addEventListener("click", () => selectThinking(button.dataset.level));
 });
 
 
+projectName?.addEventListener("click", startRename);
+projectName?.addEventListener("keydown", event => {
+if (event.key !== "Enter" && event.key !== " " && event.key !== "F2") return;
+event.preventDefault();
+startRename();
+});
+
+
+renameInput?.addEventListener("input", () => {
+if (renderName()) layoutFloats(true);
+});
+renameInput?.addEventListener("keydown", event => {
+if (event.key === "Enter" && !event.isComposing) {
+event.preventDefault();
+finishRename(true);
+projectName?.focus({ preventScroll: true });
+} else if (event.key === "Escape") {
+event.preventDefault();
+event.stopPropagation();
+finishRename(false);
+projectName?.focus({ preventScroll: true });
+}
+});
+renameInput?.addEventListener("blur", () => finishRename(true));
+
+
+fullscreenToggle?.addEventListener("click", () => setFullscreen(true));
+fullscreenExit?.addEventListener("click", () => setFullscreen(false));
+fullscreenBar?.addEventListener("pointerenter", () => {
+window.clearTimeout(peekTimer);
+peekTimer = 0;
+});
+fullscreenBar?.addEventListener("pointerleave", () => {
+if (fullscreen) queueConceal();
+});
+fullscreenBar?.addEventListener("focusin", revealBar);
+fullscreenPeek?.addEventListener("pointerenter", revealBar);
+fullscreenPeek?.addEventListener("pointerdown", revealBar);
+document.addEventListener("fullscreenchange", onNativeFullscreen);
+document.addEventListener("webkitfullscreenchange", onNativeFullscreen);
+
+
+copyButton?.addEventListener("click", copyCode);
+downloadButton?.addEventListener("click", downloadCode);
+
+
 document.addEventListener("pointerdown", event => {
 tipBlocked = event.target.closest?.("[data-tooltip]") || null;
 hideTip();
+if (fullscreen) revealBar();
 if (!menuOpen) return;
 if (modelMenu.contains(event.target) || modelTrigger.contains(event.target)) return;
 closeMenu();
@@ -2318,10 +3014,10 @@ if (event.target === tipTarget || event.target === tipPending) hideTip(false);
 
 
 document.addEventListener("keydown", event => {
-if (event.key === "Escape") {
+if (event.key !== "Escape") return;
 hideTip();
 hideNotice();
-}
+if (fullscreen && !nativeFullscreen) setFullscreen(false);
 });
 
 
@@ -2345,6 +3041,7 @@ window.addEventListener("pageshow", restoreFromHistory);
 window.addEventListener("pointermove", event => {
 onFieldPointer(event);
 onDragMove(event);
+if (fullscreen && event.pointerType !== "touch") revealBar();
 }, { passive: true });
 
 
@@ -2370,13 +3067,14 @@ body.classList.add("is-instant");
 window.clearTimeout(instantTimer);
 instantTimer = window.setTimeout(() => body.classList.remove("is-instant"), 160);
 resizeField();
-layoutFloats(false);
+layoutFloats(false, performance.now() - fullscreenAt < FULL_SETTLE);
 requestField();
 }, { passive: true });
 
 
 compactQuery.addEventListener?.("change", () => {
 closeMenu();
+applyView(false);
 layoutFloats(false);
 setDevice(device, false);
 });
@@ -2410,6 +3108,8 @@ applyModel(false);
 applyKey();
 layoutFloats(false);
 setDevice("desktop", false);
+applyView(false);
+renderName();
 render();
 
 
@@ -2422,6 +3122,8 @@ if (handoff.prompt) startBuild(handoff.step);
 window.GraphiteBuilder = {
 setState,
 setDevice,
+setView,
+setFullscreen,
 resetLayout,
 get state() {
 return state;
@@ -2431,6 +3133,12 @@ return modelId;
 },
 get thinking() {
 return thinkingId;
+},
+get view() {
+return effectiveView();
+},
+get name() {
+return displayName();
 },
 get html() {
 return siteHtml;
